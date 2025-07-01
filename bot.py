@@ -5,6 +5,9 @@ import random
 import os
 import json
 
+#Load .env file
+from dotenv import load_dotenv
+load_dotenv()
 # --- Bot Intents ---
 intents = discord.Intents.default()
 intents.message_content = True  # Required to read message content
