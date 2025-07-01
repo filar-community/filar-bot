@@ -5,6 +5,9 @@ import random
 import os
 import json
 
+#Token ONLY FOR TESTING, PLEASE REMEMBER WHEN YOU MERGE
+DISCORD_BOT_TOKEN=""
+
 # --- Bot Intents ---
 intents = discord.Intents.default()
 intents.message_content = True  # Required to read message content
