@@ -1,50 +1,48 @@
 # filar-bot
-unofficial FILAR moderation discord bot
+
+**Unofficial FILAR moderation Discord bot**
+
+---
 
 This Discord bot includes several features:
 
-    Ticket System
+## Ticket System
 
-        Provides a persistent button labeled "Create Ticket".
+- Provides a persistent button labeled **"Create Ticket"**.
+- When a user clicks the button, it creates a **private text channel** (ticket) visible only to:
+  - the user,
+  - staff members,
+  - and the bot.
+- Prevents users from opening multiple tickets simultaneously.
+- Ticket owners or staff can use the `!close` command to close and delete the ticket channel.
 
-        When a user clicks the button, it creates a private text channel (ticket) visible only to the user, staff members, and the bot.
+## Anti-Raid Verification
 
-        Prevents users from opening multiple tickets simultaneously.
+- On member join, the bot sends a **DM with a simple math question**.
+- The user must answer correctly within **2 minutes** or be automatically kicked.
+- Helps protect the server from automated bot raids.
 
-        Allows ticket owners or staff to close the ticket with the !close command, which deletes the ticket channel.
+## Self-Assign Roles
 
-    Anti-Raid Verification
+- Posts a message with **emojis linked to specific roles**.
+- Users can react to the message to **assign or remove roles**.
+- Role assignments are handled automatically when users react or unreact.
 
-        When a new member joins, the bot sends a direct message with a simple math question.
+## Reaction Tracker
 
-        The user must answer correctly within 2 minutes to avoid being kicked from the server.
+- Automatically adds **👍 and 👎 reactions** to messages in a specified channel.
+- The `!reactions` command displays a **summary of recent reactions** in that channel.
 
-        This helps prevent bot raids by verifying human users.
+## Link Filtering
 
-    Self-Assign Roles
+- **Deletes messages containing links** (`http://` or `https://`) in channels where links are not allowed.
+- Sends a **DM warning** to the user explaining why their message was removed.
+- Allows **channel-specific exceptions** where links are permitted.
 
-        Posts a message with emojis that users can react to in order to assign or remove roles themselves.
+## Temporary and Permanent Ban Command
 
-        Automatically manages role assignment/removal based on reactions to the specific message.
+- Provides a `!ban` command for moderators with ban permissions.
+- Supports **temporary bans** (e.g., `7d`, `12h`) or **permanent bans**.
+- Automatically **unbans users** after their ban duration expires, if temporary.
 
-    Reaction Tracker
-
-        Automatically adds thumbs up (👍) and thumbs down (👎) reactions to messages in a specified channel.
-
-        Provides a !reactions command to summarize the total number of 👍 and 👎 reactions on recent messages in that channel.
-
-    Link Filtering
-
-        Deletes messages containing links (http:// or https://) in channels where links are not allowed.
-
-        Notifies users via DM that their message was removed for containing a link.
-
-        Allows exceptions for specified channels where links are permitted.
-
-    Temporary and Permanent Ban Command
-
-        Provides a !ban command that allows staff with ban permissions to ban users.
-
-        Supports temporary bans with durations specified in days (d) or hours (h).
-
-        Automatically unbans the user after the ban duration expires.
+---
