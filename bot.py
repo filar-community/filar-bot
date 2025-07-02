@@ -92,7 +92,7 @@ async def close(ctx):
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}!")
+    print(f"✅ Logged in as {bot.user}!")
 
     guild = bot.get_guild(GUILD_ID)
     ticket_channel = guild.get_channel(TICKET_CHANNEL_ID)
@@ -154,15 +154,34 @@ async def on_member_join(member):
     except Exception as e:
         print(f"Error verifying member {member}: {e}")
 
-# --- Self Assign Roles ---
+# --- Self Assign Roles (Fixed) ---
 
 async def setup_self_assign_roles():
     global role_message_id
     channel = bot.get_channel(ROLE_CHANNEL_ID)
     if channel is None:
-        print("Role channel not found!")
+        print("❌ Role channel not found!")
         return
 
+    # Load the message ID if it exists
+    if os.path.exists("role_message.json"):
+        with open("role_message.json", "r") as f:
+            try:
+                data = json.load(f)
+                role_message_id = data.get("message_id")
+            except json.JSONDecodeError:
+                role_message_id = None
+
+    # Try to fetch the existing message
+    if role_message_id:
+        try:
+            msg = await channel.fetch_message(role_message_id)
+            print(f"✅ Role message found: {msg.id}")
+            return  # Reuse existing message
+        except discord.NotFound:
+            print("⚠️ Previous role message not found. Sending a new one.")
+
+    # Create a new message
     description = "React to assign yourself a role:\n"
     for emoji, role_id in EMOJI_TO_ROLE.items():
         role = channel.guild.get_role(role_id)
@@ -170,13 +189,18 @@ async def setup_self_assign_roles():
             description += f"{emoji} : {role.name}\n"
 
     embed = discord.Embed(title="Self-Assign Roles", description=description)
+    msg = await channel.send(embed=embed)
+    
+    for emoji in EMOJI_TO_ROLE.keys():
+        await msg.add_reaction(emoji)
 
-    if role_message_id is None:
-        msg = await channel.send(embed=embed)
-        for emoji in EMOJI_TO_ROLE.keys():
-            await msg.add_reaction(emoji)
-        role_message_id = msg.id
-        print(f"Role message ID: {role_message_id}")
+    role_message_id = msg.id
+
+    # Save the message ID
+    with open("role_message.json", "w") as f:
+        json.dump({"message_id": role_message_id}, f)
+
+    print(f"✅ New role message sent: {role_message_id}")
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -204,7 +228,7 @@ async def on_raw_reaction_remove(payload):
             if role:
                 await member.remove_roles(role)
 
-# --- Auto Thumbs and Reaction Cleaner ---
+# --- Auto Reactions & Link Filter ---
 
 @bot.event
 async def on_message(message):
