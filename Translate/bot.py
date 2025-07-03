@@ -26,7 +26,7 @@ intents.guilds = True
 intents.members = True
 intents.messages = True
 intents.bans = True
-intents.presences = True  # To check member activity status
+intents.presences = True  # Do sprawdzania aktywności
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -49,8 +49,11 @@ role_message_id = None
 
 # --- Helper Functions ---
 def save_message_id(filename, message_id):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump({"message_id": message_id}, f)
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump({"message_id": message_id}, f)
+    except Exception as e:
+        print(f"❌ Błąd zapisu pliku {filename}: {e}")
 
 def load_message_id(filename):
     if not os.path.exists(filename):
@@ -60,6 +63,9 @@ def load_message_id(filename):
             data = json.load(f)
             return data.get("message_id")
     except json.JSONDecodeError:
+        return None
+    except Exception as e:
+        print(f"❌ Błąd odczytu pliku {filename}: {e}")
         return None
 
 # --- Ticket System ---
@@ -104,7 +110,7 @@ async def setup_ticket_message():
     global ticket_message_id
     channel = bot.get_channel(TICKET_CHANNEL_ID)
     if not channel:
-        print("❌ Ticket channel not found!")
+        print("❌ Nie znaleziono kanału do ticketów!")
         return
 
     ticket_message_id = load_message_id("ticket_message.json")
@@ -112,31 +118,31 @@ async def setup_ticket_message():
     if ticket_message_id:
         try:
             msg = await channel.fetch_message(ticket_message_id)
-            print(f"✅ Ticket message found by ID: {msg.id}")
+            print(f"✅ Znaleziono wiadomość ticketu: {msg.id}")
             return
         except discord.NotFound:
-            print("⚠️ Stored ticket message not found, searching recent history.")
+            print("⚠️ Wiadomość ticketu nie znaleziona, szukam w historii.")
             ticket_message_id = None
 
     async for msg in channel.history(limit=50):
         if msg.author == bot.user and "Kliknij przycisk, aby utworzyć zgłoszenie." in msg.content:
             ticket_message_id = msg.id
             save_message_id("ticket_message.json", ticket_message_id)
-            print(f"✅ Found existing ticket message in channel history: {ticket_message_id}")
+            print(f"✅ Znaleziona istniejąca wiadomość ticketu: {ticket_message_id}")
             return
 
     view = TicketButton()
     msg = await channel.send("Kliknij przycisk, aby utworzyć zgłoszenie.", view=view)
     ticket_message_id = msg.id
     save_message_id("ticket_message.json", ticket_message_id)
-    print(f"✅ New ticket message sent: {ticket_message_id}")
+    print(f"✅ Wysłano nową wiadomość ticketu: {ticket_message_id}")
 
 # --- Self-Assign Roles ---
 async def setup_role_message():
     global role_message_id
     channel = bot.get_channel(ROLE_CHANNEL_ID)
     if not channel:
-        print("❌ Role channel not found!")
+        print("❌ Nie znaleziono kanału z rolami!")
         return
 
     role_message_id = load_message_id("role_message.json")
@@ -144,10 +150,10 @@ async def setup_role_message():
     if role_message_id:
         try:
             msg = await channel.fetch_message(role_message_id)
-            print(f"✅ Role message found: {msg.id}")
+            print(f"✅ Znaleziono wiadomość z rolami: {msg.id}")
             return
         except discord.NotFound:
-            print("⚠️ Previous role message not found. Sending a new one.")
+            print("⚠️ Poprzednia wiadomość z rolami nie znaleziona. Wysyłam nową.")
 
     description = "Zareaguj, żeby uzyskać rolę:\n"
     for emoji, role_id in EMOJI_TO_ROLE.items():
@@ -155,17 +161,17 @@ async def setup_role_message():
         if role:
             description += f"{emoji} : {role.name}\n"
 
-    embed = discord.Embed(title="Autorole", description=description)
+    embed = discord.Embed(title="Autorole", description=description, color=discord.Color.green())
     msg = await channel.send(embed=embed)
     for emoji in EMOJI_TO_ROLE.keys():
         try:
             await msg.add_reaction(emoji)
         except Exception as e:
-            print(f"Failed to add reaction {emoji}: {e}")
+            print(f"❌ Nie udało się dodać reakcji {emoji}: {e}")
 
     role_message_id = msg.id
     save_message_id("role_message.json", role_message_id)
-    print(f"✅ New role message sent: {role_message_id}")
+    print(f"✅ Wysłano nową wiadomość z rolami: {role_message_id}")
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -190,9 +196,9 @@ async def on_raw_reaction_add(payload):
     if role:
         try:
             await member.add_roles(role)
-            print(f"Added role {role.name} to {member}")
+            print(f"Dodano rolę {role.name} użytkownikowi {member}")
         except Exception as e:
-            print(f"Failed to add role: {e}")
+            print(f"❌ Nie udało się dodać roli: {e}")
 
 @bot.event
 async def on_raw_reaction_remove(payload):
@@ -217,16 +223,16 @@ async def on_raw_reaction_remove(payload):
     if role:
         try:
             await member.remove_roles(role)
-            print(f"Removed role {role.name} from {member}")
+            print(f"Usunięto rolę {role.name} od użytkownika {member}")
         except Exception as e:
-            print(f"Failed to remove role: {e}")
+            print(f"❌ Nie udało się usunąć roli: {e}")
 
 # --- Anti-Raid Math Challenge ---
 def generate_math_question():
     a = random.randint(1, 20)
     b = random.randint(1, 20)
     op = random.choice(['+', '-'])
-    question = f"What is {a} {op} {b}?"
+    question = f"Ile to jest {a} {op} {b}?"
     answer = a + b if op == '+' else a - b
     return question, answer
 
@@ -237,8 +243,8 @@ async def on_member_join(member):
         question, correct_answer = generate_math_question()
         dm_channel = await member.create_dm()
         await dm_channel.send(
-            f"Witaj na {member.guild.name}! Proszę rozwiąż zadanie matematyczne, żebyśmy wiedzieli, że jesteś człowiekiem.\n"
-            f"Napisz sam wynik:\n{question}"
+            f"Witaj na {member.guild.name}! Proszę rozwiąż zadanie matematyczne, aby potwierdzić, że jesteś człowiekiem.\n"
+            f"Napisz tylko wynik:\n{question}"
         )
 
         def check(m):
@@ -273,7 +279,7 @@ async def on_member_join(member):
             await member.kick(reason="Weryfikacja nieudana: zła odpowiedź")
 
     except Exception as e:
-        print(f"Error verifying member {member}: {e}")
+        print(f"❌ Błąd podczas weryfikacji użytkownika {member}: {e}")
 
 @bot.event
 async def on_member_remove(member):
@@ -299,15 +305,15 @@ async def on_message(message):
 
     last_message_times[message.author.id] = datetime.utcnow()
 
-    # Check if message is in target channel or its category
+    # Sprawdzenie czy wiadomość jest na kanale docelowym lub jego kategorii
     is_target = False
     if message.channel.id == TARGET_CHANNEL_ID:
         is_target = True
     elif getattr(message.channel, "category", None) and message.channel.category.id == TARGET_CHANNEL_ID:
         is_target = True
 
-    # Check for discord.gg or discord.com/invite links
     lowered = message.content.lower()
+    # Usuwanie linków zaproszeń poza dozwolonymi kanałami
     if ("discord.gg/" in lowered or "discord.com/invite/" in lowered) and message.channel.id not in ALLOWED_LINK_CHANNELS:
         try:
             await message.delete()
@@ -316,7 +322,7 @@ async def on_message(message):
                 delete_after=10
             )
         except Exception as e:
-            print(f"Failed to delete invite link: {e}")
+            print(f"❌ Błąd podczas usuwania linku zaproszenia: {e}")
         return
 
     await bot.process_commands(message)
@@ -350,10 +356,12 @@ async def close_ticket(ctx):
 async def reactions(ctx):
     channel = ctx.channel
     counter = 0
-    async for msg in channel.history(limit=100):
-        counter += sum(reaction.count for reaction in msg.reactions)
-
-    await ctx.send(f"W tym kanale jest {counter} reakcji na ostatnich 100 wiadomościach.")
+    try:
+        async for msg in channel.history(limit=100):
+            counter += sum(reaction.count for reaction in msg.reactions)
+        await ctx.send(f"W tym kanale jest {counter} reakcji na ostatnich 100 wiadomościach.")
+    except Exception as e:
+        await ctx.send(f"❌ Błąd podczas liczenia reakcji: {e}")
 
 @bot.command(name="stats")
 async def stats_cmd(ctx):
@@ -387,96 +395,56 @@ async def ping(ctx):
     latency_ms = round(bot.latency * 1000)
     await ctx.send(f"Pong! Opóźnienie: {latency_ms} ms")
 
-# --- NEW CLEAN COMMAND ---
-@bot.command(name="clean")
+@bot.command(name="clear")
 @commands.has_permissions(manage_messages=True)
-async def clean(ctx, amount: int, time_range: int):
+async def clear(ctx, amount: int):
     if amount <= 0:
-        await ctx.send("❌ Proszę podać liczbę większą niż 0 dla ilości wiadomości do usunięcia.", delete_after=10)
+        await ctx.send("Podaj liczbę większą niż 0.", delete_after=5)
         return
-    if time_range <= 0:
-        await ctx.send("❌ Proszę podać liczbę większą niż 0 dla zakresu czasu w godzinach.", delete_after=10)
-        return
-
-    time_limit = datetime.utcnow() - timedelta(hours=time_range)
-    deleted = 0
     try:
-        # We fetch up to 1000 messages to filter manually by time.
-        messages = []
-        async for msg in ctx.channel.history(limit=1000, oldest_first=False):
-            if msg.created_at > time_limit:
-                messages.append(msg)
-                if len(messages) >= amount:
-                    break
-
-        if not messages:
-            await ctx.send("❌ Nie znaleziono wiadomości do usunięcia w podanym zakresie czasu.", delete_after=10)
-            return
-
-        def is_deletable(m):
-            return (datetime.utcnow() - m.created_at).total_seconds() < 1209600  # 14 days in seconds
-
-        deletable_msgs = [m for m in messages if is_deletable(m)]
-        if not deletable_msgs:
-            await ctx.send("❌ Brak wiadomości do usunięcia (starsze niż 14 dni).", delete_after=10)
-            return
-
-        await ctx.channel.delete_messages(deletable_msgs)
-        deleted = len(deletable_msgs)
-        await ctx.send(f"✅ Usunięto {deleted} wiadomości z ostatnich {time_range} godzin.", delete_after=10)
+        deleted = await ctx.channel.purge(limit=amount)
+        await ctx.send(f"Usunięto {len(deleted)} wiadomości.", delete_after=5)
     except Exception as e:
-        await ctx.send(f"❌ Wystąpił błąd podczas usuwania wiadomości: {e}", delete_after=10)
+        await ctx.send(f"❌ Błąd podczas usuwania wiadomości: {e}", delete_after=5)
 
-# --- UNBAN PREFIX COMMAND ---
+@bot.command(name="ban")
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, *, reason=None):
+    try:
+        await member.ban(reason=reason)
+        await ctx.send(f"Zbanowano użytkownika {member}. Powód: {reason}")
+    except Exception as e:
+        await ctx.send(f"❌ Nie udało się zbanować użytkownika: {e}")
+
 @bot.command(name="unban")
 @commands.has_permissions(ban_members=True)
-async def unban(ctx, user: str):
-    if user.isdigit():
-        user_id = int(user)
-        user_obj = discord.Object(id=user_id)
-        try:
-            await ctx.guild.unban(user_obj)
-            await ctx.send(f"✅ Successfully unbanned user with ID `{user_id}`!")
-        except discord.NotFound:
-            await ctx.send(f"❌ No ban found for ID `{user_id}`.")
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to unban this user.")
-        except Exception as e:
-            await ctx.send(f"❌ An error occurred: {e}")
-    else:
-        if "#" not in user:
-            await ctx.send("❌ Provide either a user ID or a username with discriminator (e.g. Name#1234).")
-            return
-        user_name, user_discriminator = user.split("#")
-        try:
-            banned_users = await ctx.guild.bans()
-            banned_entry = None
-            for ban_entry in banned_users:
-                if ban_entry.user.name == user_name and ban_entry.user.discriminator == user_discriminator:
-                    banned_entry = ban_entry
-                    break
-            if not banned_entry:
-                await ctx.send(f"❌ User {user} is not banned.")
-                return
-            await ctx.guild.unban(banned_entry.user, reason=f"Unbanned by {ctx.author}")
-            await ctx.send(f"✅ User {user} has been unbanned successfully.")
-        except discord.Forbidden:
-            await ctx.send("❌ I don't have permission to unban this user.")
-        except Exception as e:
-            await ctx.send(f"❌ An error occurred: {e}")
+async def unban(ctx, user_id: int):
+    guild = ctx.guild
+    user = discord.Object(id=user_id)
+    try:
+        await guild.unban(user)
+        await ctx.send(f"Odbanowano użytkownika o ID {user_id}.")
+    except Exception as e:
+        await ctx.send(f"❌ Nie udało się odbanować: {e}")
 
-# --- On Ready ---
+@bot.command(name="kick")
+@commands.has_permissions(kick_members=True)
+async def kick(ctx, member: discord.Member, *, reason=None):
+    try:
+        await member.kick(reason=reason)
+        await ctx.send(f"Wyrzucono użytkownika {member}. Powód: {reason}")
+    except Exception as e:
+        await ctx.send(f"❌ Nie udało się wyrzucić użytkownika: {e}")
+
+# --- Event: on_ready ---
 @bot.event
 async def on_ready():
-    print(f"Zalogowano jako {bot.user} (ID: {bot.user.id})")
-    try:
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print("✅ Slash commands synced.")
-    except Exception as e:
-        print(f"❌ Błąd synchronizacji slash commands: {e}")
-
+    print(f"Bot jest gotowy! Zalogowano jako {bot.user} (ID: {bot.user.id})")
     await setup_ticket_message()
     await setup_role_message()
 
-# --- Run bot ---
-bot.run(TOKEN)
+# --- Run Bot ---
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("❌ Brak tokenu w config.json")
