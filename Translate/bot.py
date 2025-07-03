@@ -427,36 +427,43 @@ async def clean(ctx, amount: int, time_range: int):
     except Exception as e:
         await ctx.send(f"❌ Wystąpił błąd podczas usuwania wiadomości: {e}", delete_after=10)
 
-# --- UNBAN SLASH COMMAND ---
-@bot.tree.command(name="unban", description="Odbanuj użytkownika z serwera")
-@discord.app_commands.describe(user="Użytkownik do odbanowania (w formacie Nazwa#1234)")
-async def unban(interaction: discord.Interaction, user: str):
-    if not interaction.guild:
-        await interaction.response.send_message("Ta komenda działa tylko na serwerze.", ephemeral=True)
-        return
-
-    if not interaction.user.guild_permissions.ban_members:
-        await interaction.response.send_message("Nie masz uprawnień do odbanowywania użytkowników.", ephemeral=True)
-        return
-
-    try:
-        banned_users = await interaction.guild.bans()
-        user_name, user_discriminator = user.split("#")
-
-        banned_entry = None
-        for ban_entry in banned_users:
-            if (ban_entry.user.name == user_name and ban_entry.user.discriminator == user_discriminator):
-                banned_entry = ban_entry
-                break
-
-        if not banned_entry:
-            await interaction.response.send_message(f"Użytkownik {user} nie jest zbanowany.", ephemeral=True)
+# --- UNBAN PREFIX COMMAND ---
+@bot.command(name="unban")
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, user: str):
+    if user.isdigit():
+        user_id = int(user)
+        user_obj = discord.Object(id=user_id)
+        try:
+            await ctx.guild.unban(user_obj)
+            await ctx.send(f"✅ Successfully unbanned user with ID `{user_id}`!")
+        except discord.NotFound:
+            await ctx.send(f"❌ No ban found for ID `{user_id}`.")
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to unban this user.")
+        except Exception as e:
+            await ctx.send(f"❌ An error occurred: {e}")
+    else:
+        if "#" not in user:
+            await ctx.send("❌ Provide either a user ID or a username with discriminator (e.g. Name#1234).")
             return
-
-        await interaction.guild.unban(banned_entry.user, reason=f"Odbanowane przez {interaction.user}")
-        await interaction.response.send_message(f"Użytkownik {user} został odbanowany pomyślnie.")
-    except Exception as e:
-        await interaction.response.send_message(f"Wystąpił błąd: {e}", ephemeral=True)
+        user_name, user_discriminator = user.split("#")
+        try:
+            banned_users = await ctx.guild.bans()
+            banned_entry = None
+            for ban_entry in banned_users:
+                if ban_entry.user.name == user_name and ban_entry.user.discriminator == user_discriminator:
+                    banned_entry = ban_entry
+                    break
+            if not banned_entry:
+                await ctx.send(f"❌ User {user} is not banned.")
+                return
+            await ctx.guild.unban(banned_entry.user, reason=f"Unbanned by {ctx.author}")
+            await ctx.send(f"✅ User {user} has been unbanned successfully.")
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to unban this user.")
+        except Exception as e:
+            await ctx.send(f"❌ An error occurred: {e}")
 
 # --- On Ready ---
 @bot.event
