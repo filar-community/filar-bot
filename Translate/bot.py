@@ -387,13 +387,89 @@ async def ping(ctx):
     latency_ms = round(bot.latency * 1000)
     await ctx.send(f"Pong! Opóźnienie: {latency_ms} ms")
 
+# --- NEW CLEAN COMMAND ---
+@bot.command(name="clean")
+@commands.has_permissions(manage_messages=True)
+async def clean(ctx, amount: int, time_range: int):
+    if amount <= 0:
+        await ctx.send("❌ Proszę podać liczbę większą niż 0 dla ilości wiadomości do usunięcia.", delete_after=10)
+        return
+    if time_range <= 0:
+        await ctx.send("❌ Proszę podać liczbę większą niż 0 dla zakresu czasu w godzinach.", delete_after=10)
+        return
+
+    time_limit = datetime.utcnow() - timedelta(hours=time_range)
+    deleted = 0
+    try:
+        # We fetch up to 1000 messages to filter manually by time.
+        messages = []
+        async for msg in ctx.channel.history(limit=1000, oldest_first=False):
+            if msg.created_at > time_limit:
+                messages.append(msg)
+                if len(messages) >= amount:
+                    break
+
+        if not messages:
+            await ctx.send("❌ Nie znaleziono wiadomości do usunięcia w podanym zakresie czasu.", delete_after=10)
+            return
+
+        def is_deletable(m):
+            return (datetime.utcnow() - m.created_at).total_seconds() < 1209600  # 14 days in seconds
+
+        deletable_msgs = [m for m in messages if is_deletable(m)]
+        if not deletable_msgs:
+            await ctx.send("❌ Brak wiadomości do usunięcia (starsze niż 14 dni).", delete_after=10)
+            return
+
+        await ctx.channel.delete_messages(deletable_msgs)
+        deleted = len(deletable_msgs)
+        await ctx.send(f"✅ Usunięto {deleted} wiadomości z ostatnich {time_range} godzin.", delete_after=10)
+    except Exception as e:
+        await ctx.send(f"❌ Wystąpił błąd podczas usuwania wiadomości: {e}", delete_after=10)
+
+# --- UNBAN SLASH COMMAND ---
+@bot.tree.command(name="unban", description="Odbanuj użytkownika z serwera")
+@discord.app_commands.describe(user="Użytkownik do odbanowania (w formacie Nazwa#1234)")
+async def unban(interaction: discord.Interaction, user: str):
+    if not interaction.guild:
+        await interaction.response.send_message("Ta komenda działa tylko na serwerze.", ephemeral=True)
+        return
+
+    if not interaction.user.guild_permissions.ban_members:
+        await interaction.response.send_message("Nie masz uprawnień do odbanowywania użytkowników.", ephemeral=True)
+        return
+
+    try:
+        banned_users = await interaction.guild.bans()
+        user_name, user_discriminator = user.split("#")
+
+        banned_entry = None
+        for ban_entry in banned_users:
+            if (ban_entry.user.name == user_name and ban_entry.user.discriminator == user_discriminator):
+                banned_entry = ban_entry
+                break
+
+        if not banned_entry:
+            await interaction.response.send_message(f"Użytkownik {user} nie jest zbanowany.", ephemeral=True)
+            return
+
+        await interaction.guild.unban(banned_entry.user, reason=f"Odbanowane przez {interaction.user}")
+        await interaction.response.send_message(f"Użytkownik {user} został odbanowany pomyślnie.")
+    except Exception as e:
+        await interaction.response.send_message(f"Wystąpił błąd: {e}", ephemeral=True)
+
 # --- On Ready ---
 @bot.event
 async def on_ready():
-    print(f"Bot zalogowany jako {bot.user} (ID: {bot.user.id})")
+    print(f"Zalogowano jako {bot.user} (ID: {bot.user.id})")
+    try:
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print("✅ Slash commands synced.")
+    except Exception as e:
+        print(f"❌ Błąd synchronizacji slash commands: {e}")
+
     await setup_ticket_message()
     await setup_role_message()
-    print("Setup finished.")
 
-# --- Run Bot ---
+# --- Run bot ---
 bot.run(TOKEN)
