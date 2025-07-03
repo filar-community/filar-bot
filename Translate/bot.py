@@ -4,7 +4,7 @@ import asyncio
 import random
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # --- Load Config ---
 with open("config.json", "r", encoding="utf-8") as f:
@@ -26,7 +26,7 @@ intents.guilds = True
 intents.members = True
 intents.messages = True
 intents.bans = True
-intents.presences = True  # Do sprawdzania aktywności
+intents.presences = True  # !stats comand (activity check)
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -303,9 +303,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    last_message_times[message.author.id] = datetime.utcnow()
+    last_message_times[message.author.id] = datetime.now(timezone.utc)
 
-    # Sprawdzenie czy wiadomość jest na kanale docelowym lub jego kategorii
+    # Checking if a message is in the target channel or its category
     is_target = False
     if message.channel.id == TARGET_CHANNEL_ID:
         is_target = True
@@ -313,7 +313,7 @@ async def on_message(message):
         is_target = True
 
     lowered = message.content.lower()
-    # Usuwanie linków zaproszeń poza dozwolonymi kanałami
+    # Removing invite links outside of allowed channels
     if ("discord.gg/" in lowered or "discord.com/invite/" in lowered) and message.channel.id not in ALLOWED_LINK_CHANNELS:
         try:
             await message.delete()
@@ -370,7 +370,7 @@ async def stats_cmd(ctx):
         await ctx.send("Ta komenda działa tylko na serwerze.")
         return
 
-    threshold = datetime.utcnow() - timedelta(days=30)
+    threshold = datetime.now(timezone.utc) - timedelta(days=30)
     inactive_count = 0
     for member in guild.members:
         if member.bot:
