@@ -407,6 +407,22 @@ async def clear(ctx, amount: int):
     except Exception as e:
         await ctx.send(f"❌ Błąd podczas usuwania wiadomości: {e}", delete_after=5)
 
+@bot.command(name="clearuser")
+@commands.has_permissions(manage_messages=True)
+async def clearuser(ctx, member: discord.Member, amount: int = 100):
+    if amount <= 0:
+        await ctx.send("Podaj liczbę większą niż 0.", delete_after=5)
+        return
+    deleted_count = 0
+    try:
+        def is_user(m):
+            return m.author == member
+        deleted = await ctx.channel.purge(limit=amount, check=is_user)
+        deleted_count = len(deleted)
+        await ctx.send(f"Usunięto {deleted_count} wiadomości użytkownika {member.mention}.", delete_after=5)
+    except Exception as e:
+        await ctx.send(f"❌ Błąd podczas usuwania wiadomości: {e}", delete_after=5)
+
 @bot.command(name="ban")
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
