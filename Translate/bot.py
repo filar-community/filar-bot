@@ -33,9 +33,14 @@ role_message_id = None
 
 # --- Ticket System ---
 
-async def get_or_create_role_message(channel: discord.TextChannel):
-    role_message_id = None
-    # Load the message ID if it exists
+async def setup_ticket_message():
+    global role_message_id
+    channel = bot.get_channel(TICKET_CHANNEL_ID)
+    if channel is None:
+        print("❌ Ticket channel not found!")
+        return
+
+    # Load existing message ID
     if os.path.exists("role_message.json"):
         with open("role_message.json", "r") as f:
             try:
@@ -44,25 +49,26 @@ async def get_or_create_role_message(channel: discord.TextChannel):
             except json.JSONDecodeError:
                 role_message_id = None
 
-    # Try to fetch the existing message
+    # Try to fetch existing message to avoid duplication
     if role_message_id:
         try:
             msg = await channel.fetch_message(role_message_id)
-            print(f"✅ Role message found: {msg.id}")
-            return msg  # Reuse existing message
+            print(f"✅ Ticket message found: {msg.id}")
+            return  # Reuse existing message
         except discord.NotFound:
-            print("⚠️ Previous role message not found. Sending a new one.")
+            print("⚠️ Previous ticket message not found. Sending a new one.")
 
-    # Jeśli nie znaleziono, wyślij nową wiadomość
+    # Send new ticket creation message with button
     view = TicketButton()
     msg = await channel.send("Kliknij przycisk, aby utworzyć zgłoszenie.", view=view)
 
-    # Zapisz nowy message_id do pliku
-    with open("role_message.json", "w") as f:
-        json.dump({"message_id": msg.id}, f)
-    print(f"✅ New role message sent: {msg.id}")
+    role_message_id = msg.id
 
-    return msg
+    # Save the message ID
+    with open("role_message.json", "w") as f:
+        json.dump({"message_id": role_message_id}, f)
+
+    print(f"✅ New ticket message sent: {role_message_id}")
 
 class TicketButton(discord.ui.View):
     def __init__(self):
@@ -94,7 +100,10 @@ class TicketButton(discord.ui.View):
         open_tickets[user_id] = ticket_channel.id
 
         await interaction.response.send_message(f"Twoje zgłoszenie zostało utworzone: {ticket_channel.mention}", ephemeral=True)
-        await ticket_channel.send(f"Cześć {interaction.user.mention}! Niedługo powinna pojawić się moderacja.\nŻeby zamknąć zgłoszenie, napisz `!close`.")
+        await ticket_channel.send(
+            f"Cześć {interaction.user.mention}! Niedługo powinna pojawić się moderacja.\n"
+            "Żeby zamknąć zgłoszenie, napisz `!close`."
+        )
 
 @bot.command()
 async def close(ctx):
@@ -118,6 +127,11 @@ async def close(ctx):
     open_tickets.pop(owner_id)
     await ctx.send("Zamykam zgłoszenie...")
     await channel.delete(reason=f"Zgłoszenie zamknięte przez {ctx.author}")
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    await setup_ticket_message()
 
 # --- On Ready ---
 
