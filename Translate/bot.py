@@ -33,6 +33,37 @@ role_message_id = None
 
 # --- Ticket System ---
 
+async def get_or_create_role_message(channel: discord.TextChannel):
+    role_message_id = None
+    # Load the message ID if it exists
+    if os.path.exists("role_message.json"):
+        with open("role_message.json", "r") as f:
+            try:
+                data = json.load(f)
+                role_message_id = data.get("message_id")
+            except json.JSONDecodeError:
+                role_message_id = None
+
+    # Try to fetch the existing message
+    if role_message_id:
+        try:
+            msg = await channel.fetch_message(role_message_id)
+            print(f"✅ Role message found: {msg.id}")
+            return msg  # Reuse existing message
+        except discord.NotFound:
+            print("⚠️ Previous role message not found. Sending a new one.")
+
+    # Jeśli nie znaleziono, wyślij nową wiadomość
+    view = TicketButton()
+    msg = await channel.send("Kliknij przycisk, aby utworzyć zgłoszenie.", view=view)
+
+    # Zapisz nowy message_id do pliku
+    with open("role_message.json", "w") as f:
+        json.dump({"message_id": msg.id}, f)
+    print(f"✅ New role message sent: {msg.id}")
+
+    return msg
+
 class TicketButton(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -50,7 +81,7 @@ class TicketButton(discord.ui.View):
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             interaction.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
             guild.get_role(STAFF_ROLE_ID): discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            bot.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True),
         }
 
         ticket_channel = await guild.create_text_channel(
@@ -76,7 +107,7 @@ async def close(ctx):
 
     owner_id = next((uid for uid, cid in open_tickets.items() if cid == channel.id), None)
     if owner_id is None:
-        await ctx.send("Error: ticket owner not found.")
+        await ctx.send("Błąd: nie znaleziono właściciela zgłoszenia.")
         return
 
     is_staff = any(role.id == STAFF_ROLE_ID for role in ctx.author.roles)
