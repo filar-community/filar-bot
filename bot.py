@@ -4,7 +4,7 @@ import asyncio
 import random
 import os
 import json
-
+## IMPORTANT, THIS CODE IS OUTDATED, IF YOU WANT CONRTIBUTE GO Root/Translate/bot.py
 # --- Load Config ---
 with open("config.json", "r") as f:
     config = json.load(f)
