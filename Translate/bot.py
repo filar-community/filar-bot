@@ -26,11 +26,11 @@ intents.guilds = True
 intents.members = True
 intents.messages = True
 intents.bans = True
-intents.presences = True  # !stats comand (activity check)
+intents.presences = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Globals for stats ---
+# --- Globals ---
 stats = {
     "passed_verification": 0,
     "failed_verification": 0,
@@ -47,7 +47,7 @@ open_tickets = {}
 ticket_message_id = None
 role_message_id = None
 
-# --- Helper Functions ---
+# --- Helpers ---
 def save_message_id(filename, message_id):
     try:
         with open(filename, "w", encoding="utf-8") as f:
@@ -62,8 +62,6 @@ def load_message_id(filename):
         with open(filename, "r", encoding="utf-8") as f:
             data = json.load(f)
             return data.get("message_id")
-    except json.JSONDecodeError:
-        return None
     except Exception as e:
         print(f"❌ Błąd odczytu pliku {filename}: {e}")
         return None
@@ -117,11 +115,11 @@ async def setup_ticket_message():
 
     if ticket_message_id:
         try:
-            msg = await channel.fetch_message(ticket_message_id)
-            print(f"✅ Znaleziono wiadomość ticketu: {msg.id}")
+            await channel.fetch_message(ticket_message_id)
+            print(f"✅ Znaleziono wiadomość ticketu: {ticket_message_id}")
             return
         except discord.NotFound:
-            print("⚠️ Wiadomość ticketu nie znaleziona, szukam w historii.")
+            print("⚠️ Wiadomość ticketu nie znaleziona, tworzę nową.")
             ticket_message_id = None
 
     async for msg in channel.history(limit=50):
@@ -137,7 +135,7 @@ async def setup_ticket_message():
     save_message_id("ticket_message.json", ticket_message_id)
     print(f"✅ Wysłano nową wiadomość ticketu: {ticket_message_id}")
 
-# --- Self-Assign Roles ---
+# --- Role Message ---
 async def setup_role_message():
     global role_message_id
     channel = bot.get_channel(ROLE_CHANNEL_ID)
@@ -149,11 +147,11 @@ async def setup_role_message():
 
     if role_message_id:
         try:
-            msg = await channel.fetch_message(role_message_id)
-            print(f"✅ Znaleziono wiadomość z rolami: {msg.id}")
+            await channel.fetch_message(role_message_id)
+            print(f"✅ Znaleziono wiadomość z rolami: {role_message_id}")
             return
         except discord.NotFound:
-            print("⚠️ Poprzednia wiadomość z rolami nie znaleziona. Wysyłam nową.")
+            print("⚠️ Stara wiadomość nie znaleziona. Wysyłam nową.")
 
     description = "Zareaguj, żeby uzyskać rolę:\n"
     for emoji, role_id in EMOJI_TO_ROLE.items():
@@ -175,14 +173,13 @@ async def setup_role_message():
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    if payload.message_id != role_message_id:
-        return
-    if payload.user_id == bot.user.id:
+    if payload.message_id != role_message_id or payload.user_id == bot.user.id:
         return
 
     guild = bot.get_guild(payload.guild_id)
     if not guild:
         return
+
     member = guild.get_member(payload.user_id)
     if not member or member.bot:
         return
@@ -202,14 +199,13 @@ async def on_raw_reaction_add(payload):
 
 @bot.event
 async def on_raw_reaction_remove(payload):
-    if payload.message_id != role_message_id:
-        return
-    if payload.user_id == bot.user.id:
+    if payload.message_id != role_message_id or payload.user_id == bot.user.id:
         return
 
     guild = bot.get_guild(payload.guild_id)
     if not guild:
         return
+
     member = guild.get_member(payload.user_id)
     if not member or member.bot:
         return
@@ -227,10 +223,9 @@ async def on_raw_reaction_remove(payload):
         except Exception as e:
             print(f"❌ Nie udało się usunąć roli: {e}")
 
-# --- Anti-Raid Math Challenge ---
+# --- Anti-Raid Math Verification ---
 def generate_math_question():
-    a = random.randint(1, 20)
-    b = random.randint(1, 20)
+    a, b = random.randint(1, 20), random.randint(1, 20)
     op = random.choice(['+', '-'])
     question = f"Ile to jest {a} {op} {b}?"
     answer = a + b if op == '+' else a - b
@@ -243,8 +238,7 @@ async def on_member_join(member):
         question, correct_answer = generate_math_question()
         dm_channel = await member.create_dm()
         await dm_channel.send(
-            f"Witaj na {member.guild.name}! Proszę rozwiąż zadanie matematyczne, aby potwierdzić, że jesteś człowiekiem.\n"
-            f"Napisz tylko wynik:\n{question}"
+            f"Witaj na {member.guild.name}! Proszę rozwiąż zadanie matematyczne:\n{question}"
         )
 
         def check(m):
@@ -253,33 +247,27 @@ async def on_member_join(member):
         try:
             msg = await bot.wait_for('message', check=check, timeout=120)
         except asyncio.TimeoutError:
-            await dm_channel.send("Nie odpowiedziałeś na czas. Spróbuj dołączyć ponownie i rozwiązać zadanie.")
+            await dm_channel.send("Czas minął. Spróbuj ponownie.")
             stats["failed_verification"] += 1
             failed_verifications.add(member.id)
-            await member.kick(reason="Weryfikacja nieudana: timeout")
+            await member.kick(reason="Verification timeout")
             return
 
         try:
-            user_answer = int(msg.content.strip())
-        except ValueError:
-            await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
+            if int(msg.content.strip()) == correct_answer:
+                await dm_channel.send("Weryfikacja zakończona sukcesem!")
+                stats["passed_verification"] += 1
+                verified_members.add(member.id)
+            else:
+                raise ValueError("Wrong answer")
+        except Exception:
+            await dm_channel.send("Niepoprawna odpowiedź.")
             stats["failed_verification"] += 1
             failed_verifications.add(member.id)
-            await member.kick(reason="Weryfikacja nieudana: zła odpowiedź")
-            return
-
-        if user_answer == correct_answer:
-            await dm_channel.send("Weryfikacja zakończona sukcesem. Witamy na serwerze!")
-            stats["passed_verification"] += 1
-            verified_members.add(member.id)
-        else:
-            await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
-            stats["failed_verification"] += 1
-            failed_verifications.add(member.id)
-            await member.kick(reason="Weryfikacja nieudana: zła odpowiedź")
+            await member.kick(reason="Wrong answer")
 
     except Exception as e:
-        print(f"❌ Błąd podczas weryfikacji użytkownika {member}: {e}")
+        print(f"❌ Weryfikacja error: {e}")
 
 @bot.event
 async def on_member_remove(member):
@@ -305,24 +293,15 @@ async def on_message(message):
 
     last_message_times[message.author.id] = datetime.now(timezone.utc)
 
-    # Checking if a message is in the target channel or its category
-    is_target = False
-    if message.channel.id == TARGET_CHANNEL_ID:
-        is_target = True
-    elif getattr(message.channel, "category", None) and message.channel.category.id == TARGET_CHANNEL_ID:
-        is_target = True
-
-    lowered = message.content.lower()
-    # Removing invite links outside of allowed channels
-    if ("discord.gg/" in lowered or "discord.com/invite/" in lowered) and message.channel.id not in ALLOWED_LINK_CHANNELS:
+    if ("discord.gg/" in message.content.lower() or "discord.com/invite/" in message.content.lower()) and message.channel.id not in ALLOWED_LINK_CHANNELS:
         try:
             await message.delete()
             await message.channel.send(
-                f"{message.author.mention}, linki zaproszeń nie są dozwolone tutaj.",
+                f"{message.author.mention}, linki zaproszeń są niedozwolone tutaj.",
                 delete_after=10
             )
         except Exception as e:
-            print(f"❌ Błąd podczas usuwania linku zaproszenia: {e}")
+            print(f"❌ Nie udało się usunąć linku: {e}")
         return
 
     await bot.process_commands(message)
@@ -331,69 +310,43 @@ async def on_message(message):
 @bot.command(name="close")
 async def close_ticket(ctx):
     user_id = ctx.author.id
-    if user_id not in open_tickets:
+    ticket_channel_id = open_tickets.get(user_id)
+
+    if not ticket_channel_id:
         await ctx.send("Nie masz otwartego zgłoszenia.", delete_after=10)
         return
 
-    ticket_channel_id = open_tickets[user_id]
-    ticket_channel = bot.get_channel(ticket_channel_id)
-    if ticket_channel:
-        try:
-            await ticket_channel.delete(reason=f"Zgłoszenie zamknięte przez {ctx.author}")
-            del open_tickets[user_id]
-            await ctx.send("Twoje zgłoszenie zostało zamknięte.", delete_after=10)
-        except Exception as e:
-            await ctx.send(f"Nie udało się zamknąć zgłoszenia: {e}", delete_after=10)
-    else:
-        del open_tickets[user_id]
-        await ctx.send(
-            "Nie znaleziono kanału zgłoszenia, ale twoje zgłoszenie zostało usunięte z listy.",
-            delete_after=10
-        )
+    channel = bot.get_channel(ticket_channel_id)
+    if channel:
+        await channel.delete(reason=f"Zamknięcie przez {ctx.author}")
+    open_tickets.pop(user_id, None)
+    await ctx.send("Zgłoszenie zamknięte.", delete_after=10)
 
 @bot.command(name="reactions")
 @commands.has_permissions(manage_messages=True)
 async def reactions(ctx):
-    channel = ctx.channel
     counter = 0
     try:
-        async for msg in channel.history(limit=100):
+        async for msg in ctx.channel.history(limit=100):
             counter += sum(reaction.count for reaction in msg.reactions)
-        await ctx.send(f"W tym kanale jest {counter} reakcji na ostatnich 100 wiadomościach.")
+        await ctx.send(f"Liczba reakcji w 100 wiadomościach: {counter}")
     except Exception as e:
-        await ctx.send(f"❌ Błąd podczas liczenia reakcji: {e}")
+        await ctx.send(f"❌ Błąd: {e}")
 
 @bot.command(name="stats")
 async def stats_cmd(ctx):
-    guild = ctx.guild
-    if not guild:
-        await ctx.send("Ta komenda działa tylko na serwerze.")
-        return
-
     threshold = datetime.now(timezone.utc) - timedelta(days=30)
-    inactive_count = 0
-    for member in guild.members:
-        if member.bot:
-            continue
-        last_msg = last_message_times.get(member.id)
-        if not last_msg or last_msg < threshold:
-            inactive_count += 1
-    stats["inactive_users"] = inactive_count
+    inactive = sum(1 for m in ctx.guild.members if not m.bot and (last_message_times.get(m.id) or threshold) < threshold)
+    stats["inactive_users"] = inactive
 
-    embed = discord.Embed(title="Statystyki serwera", color=discord.Color.blue())
-    embed.add_field(name="Przeszło weryfikację", value=stats["passed_verification"], inline=True)
-    embed.add_field(name="Nie przeszło weryfikacji", value=stats["failed_verification"], inline=True)
-    embed.add_field(name="Dołączyło użytkowników", value=stats["users_joined"], inline=True)
-    embed.add_field(name="Opuściło użytkowników", value=stats["users_left"], inline=True)
-    embed.add_field(name="Zbanowanych użytkowników", value=stats["banned_users"], inline=True)
-    embed.add_field(name="Nieaktywnych użytkowników (30 dni)", value=stats["inactive_users"], inline=True)
-
+    embed = discord.Embed(title="Statystyki", color=discord.Color.blue())
+    for key, value in stats.items():
+        embed.add_field(name=key.replace('_', ' ').title(), value=value, inline=True)
     await ctx.send(embed=embed)
 
 @bot.command(name="ping")
 async def ping(ctx):
-    latency_ms = round(bot.latency * 1000)
-    await ctx.send(f"Pong! Opóźnienie: {latency_ms} ms")
+    await ctx.send(f"Pong! Opóźnienie: {round(bot.latency * 1000)} ms")
 
 @bot.command(name="clear")
 @commands.has_permissions(manage_messages=True)
@@ -405,40 +358,29 @@ async def clear(ctx, amount: int):
         deleted = await ctx.channel.purge(limit=amount)
         await ctx.send(f"Usunięto {len(deleted)} wiadomości.", delete_after=5)
     except Exception as e:
-        await ctx.send(f"❌ Błąd podczas usuwania wiadomości: {e}", delete_after=5)
+        await ctx.send(f"❌ Błąd: {e}")
 
 @bot.command(name="clearuser")
 @commands.has_permissions(manage_messages=True)
 async def clearuser(ctx, member: discord.Member, amount: int = 100):
-    if amount <= 0:
-        await ctx.send("Podaj liczbę większą niż 0.", delete_after=5)
-        return
-    deleted_count = 0
-    try:
-        def is_user(m):
-            return m.author == member
-        deleted = await ctx.channel.purge(limit=amount, check=is_user)
-        deleted_count = len(deleted)
-        await ctx.send(f"Usunięto {deleted_count} wiadomości użytkownika {member.mention}.", delete_after=5)
-    except Exception as e:
-        await ctx.send(f"❌ Błąd podczas usuwania wiadomości: {e}", delete_after=5)
+    deleted = await ctx.channel.purge(limit=amount, check=lambda m: m.author == member)
+    await ctx.send(f"Usunięto {len(deleted)} wiadomości użytkownika {member.display_name}.", delete_after=5)
 
 @bot.command(name="ban")
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, member: discord.Member, *, reason=None):
     try:
         await member.ban(reason=reason)
-        await ctx.send(f"Zbanowano użytkownika {member}. Powód: {reason}")
+        await ctx.send(f"Zbanowano {member} za: {reason}")
     except Exception as e:
-        await ctx.send(f"❌ Nie udało się zbanować użytkownika: {e}")
+        await ctx.send(f"❌ Nie udało się zbanować: {e}")
 
 @bot.command(name="unban")
 @commands.has_permissions(ban_members=True)
 async def unban(ctx, user_id: int):
-    guild = ctx.guild
-    user = discord.Object(id=user_id)
     try:
-        await guild.unban(user)
+        user = discord.Object(id=user_id)
+        await ctx.guild.unban(user)
         await ctx.send(f"Odbanowano użytkownika o ID {user_id}.")
     except Exception as e:
         await ctx.send(f"❌ Nie udało się odbanować: {e}")
@@ -448,18 +390,18 @@ async def unban(ctx, user_id: int):
 async def kick(ctx, member: discord.Member, *, reason=None):
     try:
         await member.kick(reason=reason)
-        await ctx.send(f"Wyrzucono użytkownika {member}. Powód: {reason}")
+        await ctx.send(f"Wyrzucono {member} za: {reason}")
     except Exception as e:
-        await ctx.send(f"❌ Nie udało się wyrzucić użytkownika: {e}")
+        await ctx.send(f"❌ Nie udało się wyrzucić: {e}")
 
-# --- Event: on_ready ---
+# --- Bot Ready ---
 @bot.event
 async def on_ready():
-    print(f"Bot jest gotowy! Zalogowano jako {bot.user} (ID: {bot.user.id})")
+    print(f"✅ Bot gotowy! Zalogowano jako {bot.user} (ID: {bot.user.id})")
     await setup_ticket_message()
     await setup_role_message()
 
-# --- Run Bot ---
+# --- Start Bot ---
 if TOKEN:
     bot.run(TOKEN)
 else:
