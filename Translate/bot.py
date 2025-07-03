@@ -262,21 +262,21 @@ async def on_member_join(member):
             msg = await bot.wait_for('message', check=check, timeout=120)
         except asyncio.TimeoutError:
             await dm_channel.send("Nie odpowiedziałeś na czas. Spróbuj dołączyć ponownie i rozwiązać zadanie.")
-            await member.kick(reason="Weryfikacja nieudana - timeout")
+            await member.kick(reason="Weryfikacja nieudana: timeout")
             return
 
         try:
             user_answer = int(msg.content.strip())
         except ValueError:
             await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
-            await member.kick(reason="Weryfikacja nieudana - zła odpowiedź")
+            await member.kick(reason="Weryfikacja nieudana: zła odpowiedź")
             return
 
         if user_answer == correct_answer:
             await dm_channel.send("Weryfikacja zakończona sukcesem. Witamy na serwerze!")
         else:
             await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
-            await member.kick(reason="Weryfikacja nieudana - zła odpowiedź")
+            await member.kick(reason="Weryfikacja nieudana: zła odpowiedź")
 
     except Exception as e:
         print(f"Error verifying member {member}: {e}")
