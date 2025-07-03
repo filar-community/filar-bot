@@ -9,15 +9,15 @@ import json
 with open("config.json", "r") as f:
     config = json.load(f)
 
-TOKEN = config["token"]
+TOKEN = config.get("token")
 COMMAND_PREFIX = config.get("prefix", "!")
-GUILD_ID = config["guild_id"]
-TICKET_CHANNEL_ID = config["ticket_channel_id"]
-STAFF_ROLE_ID = config["staff_role_id"]
-ROLE_CHANNEL_ID = config["role_channel_id"]
-TARGET_CHANNEL_ID = config["target_channel_id"]
-ALLOWED_LINK_CHANNELS = set(config["allowed_link_channels"])
-EMOJI_TO_ROLE = config["emoji_to_role"]
+GUILD_ID = config.get("guild_id")
+TICKET_CHANNEL_ID = config.get("ticket_channel_id")
+STAFF_ROLE_ID = config.get("staff_role_id")
+ROLE_CHANNEL_ID = config.get("role_channel_id")
+TARGET_CHANNEL_ID = config.get("target_channel_id")
+ALLOWED_LINK_CHANNELS = set(config.get("allowed_link_channels", []))
+EMOJI_TO_ROLE = config.get("emoji_to_role", {})
 
 # --- Intents and Bot Setup ---
 intents = discord.Intents.default()
@@ -28,58 +28,26 @@ intents.members = True
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 
 # --- Globals ---
-open_tickets = {}
+open_tickets = {}  # user_id : channel_id
+ticket_message_id = None
 role_message_id = None
 
+# --- Helper Functions to Save/Load IDs ---
+def save_message_id(filename, message_id):
+    with open(filename, "w") as f:
+        json.dump({"message_id": message_id}, f)
+
+def load_message_id(filename):
+    if not os.path.exists(filename):
+        return None
+    try:
+        with open(filename, "r") as f:
+            data = json.load(f)
+            return data.get("message_id")
+    except json.JSONDecodeError:
+        return None
+
 # --- Ticket System ---
-
-role_message_id = None  # global to store the message ID
-
-async def setup_ticket_message():
-    global role_message_id
-    channel = bot.get_channel(TICKET_CHANNEL_ID)
-    if channel is None:
-        print("❌ Ticket channel not found!")
-        return
-
-    # Load existing message ID from file
-    if os.path.exists("role_message.json"):
-        with open("role_message.json", "r") as f:
-            try:
-                data = json.load(f)
-                role_message_id = data.get("message_id")
-            except json.JSONDecodeError:
-                role_message_id = None
-
-    # Try to fetch the existing message by saved ID
-    if role_message_id:
-        try:
-            msg = await channel.fetch_message(role_message_id)
-            print(f"✅ Ticket message found by ID: {msg.id}")
-            return  # Message exists, do nothing more
-        except discord.NotFound:
-            print("⚠️ Stored ticket message not found, will try to find in history.")
-            role_message_id = None  # Reset to send new message
-
-    # If no saved message or fetch failed, try to find a similar message in recent history
-    async for message in channel.history(limit=50):
-        if message.author == bot.user and "Kliknij przycisk, aby utworzyć zgłoszenie." in message.content:
-            role_message_id = message.id
-            print(f"✅ Found existing ticket message in channel history: {role_message_id}")
-            return  # Found existing message, stop here
-
-    # If no existing message found, send a new one with button
-    view = TicketButton()
-    msg = await channel.send("Kliknij przycisk, aby utworzyć zgłoszenie.", view=view)
-
-    role_message_id = msg.id
-
-    # Save the message ID to file for next restarts
-    with open("role_message.json", "w") as f:
-        json.dump({"message_id": role_message_id}, f)
-
-    print(f"✅ New ticket message sent: {role_message_id}")
-
 
 class TicketButton(discord.ui.View):
     def __init__(self):
@@ -118,17 +86,49 @@ class TicketButton(discord.ui.View):
             "Żeby zamknąć zgłoszenie, napisz `!close`."
         )
 
+async def setup_ticket_message():
+    global ticket_message_id
+    channel = bot.get_channel(TICKET_CHANNEL_ID)
+    if not channel:
+        print("❌ Ticket channel not found!")
+        return
+
+    ticket_message_id = load_message_id("ticket_message.json")
+
+    # Try fetch existing message by saved ID
+    if ticket_message_id:
+        try:
+            msg = await channel.fetch_message(ticket_message_id)
+            print(f"✅ Ticket message found by ID: {msg.id}")
+            return  # message exists, done
+        except discord.NotFound:
+            print("⚠️ Stored ticket message not found, searching recent history.")
+            ticket_message_id = None
+
+    # Search recent history for existing ticket message
+    async for msg in channel.history(limit=50):
+        if msg.author == bot.user and "Kliknij przycisk, aby utworzyć zgłoszenie." in msg.content:
+            ticket_message_id = msg.id
+            save_message_id("ticket_message.json", ticket_message_id)
+            print(f"✅ Found existing ticket message in channel history: {ticket_message_id}")
+            return
+
+    # If no message found, send new one
+    view = TicketButton()
+    msg = await channel.send("Kliknij przycisk, aby utworzyć zgłoszenie.", view=view)
+    ticket_message_id = msg.id
+    save_message_id("ticket_message.json", ticket_message_id)
+    print(f"✅ New ticket message sent: {ticket_message_id}")
 
 @bot.command()
 async def close(ctx):
-    user_id = ctx.author.id
-    channel = ctx.channel
-
-    if channel.id not in open_tickets.values():
+    channel_id = ctx.channel.id
+    if channel_id not in open_tickets.values():
         await ctx.send("Ta komenda może zostać użyta tylko w zgłoszeniu.")
         return
 
-    owner_id = next((uid for uid, cid in open_tickets.items() if cid == channel.id), None)
+    # Find owner of ticket
+    owner_id = next((uid for uid, cid in open_tickets.items() if cid == channel_id), None)
     if owner_id is None:
         await ctx.send("Błąd: nie znaleziono właściciela zgłoszenia.")
         return
@@ -140,28 +140,100 @@ async def close(ctx):
 
     open_tickets.pop(owner_id)
     await ctx.send("Zamykam zgłoszenie...")
-    await channel.delete(reason=f"Zgłoszenie zamknięte przez {ctx.author}")
+    await ctx.channel.delete(reason=f"Zgłoszenie zamknięte przez {ctx.author}")
 
-# --- On Ready ---
+# --- Self-Assign Roles ---
+
+async def setup_role_message():
+    global role_message_id
+    channel = bot.get_channel(ROLE_CHANNEL_ID)
+    if not channel:
+        print("❌ Role channel not found!")
+        return
+
+    role_message_id = load_message_id("role_message.json")
+
+    # Try fetch existing message by saved ID
+    if role_message_id:
+        try:
+            msg = await channel.fetch_message(role_message_id)
+            print(f"✅ Role message found: {msg.id}")
+            return
+        except discord.NotFound:
+            print("⚠️ Previous role message not found. Sending a new one.")
+
+    # Send new role message
+    description = "Zareaguj, żeby uzyskać rolę:\n"
+    for emoji, role_id in EMOJI_TO_ROLE.items():
+        role = channel.guild.get_role(role_id)
+        if role:
+            description += f"{emoji} : {role.name}\n"
+
+    embed = discord.Embed(title="Autorole", description=description)
+    msg = await channel.send(embed=embed)
+    for emoji in EMOJI_TO_ROLE.keys():
+        try:
+            await msg.add_reaction(emoji)
+        except Exception as e:
+            print(f"Failed to add reaction {emoji}: {e}")
+
+    role_message_id = msg.id
+    save_message_id("role_message.json", role_message_id)
+    print(f"✅ New role message sent: {role_message_id}")
 
 @bot.event
-async def on_ready():
-    print(f"✅ Logged in as {bot.user}!")
+async def on_raw_reaction_add(payload):
+    if payload.message_id != role_message_id:
+        return
+    if payload.user_id == bot.user.id:
+        return
 
-    guild = bot.get_guild(GUILD_ID)
-    ticket_channel = guild.get_channel(TICKET_CHANNEL_ID)
-    if ticket_channel:
-        async for msg in ticket_channel.history(limit=100):
-            if msg.author == bot.user and msg.content.startswith("Click the button"):
-                await msg.edit(view=TicketButton())
-                break
-        else:
-            await ticket_channel.send("Naciśnij poniżej, aby skontaktować się z moderacją.", view=TicketButton())
-    else:
-        print("❌ Ticket channel not found!")
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    member = guild.get_member(payload.user_id)
+    if not member or member.bot:
+        return
 
-    await setup_self_assign_roles()
-    print("✅ Bot is ready.")
+    emoji_str = str(payload.emoji)
+    role_id = EMOJI_TO_ROLE.get(emoji_str)
+    if not role_id:
+        return
+
+    role = guild.get_role(role_id)
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"Added role {role.name} to {member}")
+        except Exception as e:
+            print(f"Failed to add role: {e}")
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    if payload.message_id != role_message_id:
+        return
+    if payload.user_id == bot.user.id:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+    member = guild.get_member(payload.user_id)
+    if not member or member.bot:
+        return
+
+    emoji_str = str(payload.emoji)
+    role_id = EMOJI_TO_ROLE.get(emoji_str)
+    if not role_id:
+        return
+
+    role = guild.get_role(role_id)
+    if role:
+        try:
+            await member.remove_roles(role)
+            print(f"Removed role {role.name} from {member}")
+        except Exception as e:
+            print(f"Failed to remove role: {e}")
 
 # --- Anti-Raid Math Challenge ---
 
@@ -179,7 +251,8 @@ async def on_member_join(member):
         question, correct_answer = generate_math_question()
         dm_channel = await member.create_dm()
         await dm_channel.send(
-            f"Welcome to {member.guild.name}! Proszę rozwiąż zadanie matematyczne, żebyśmy wiedzieli, że jesteś człowiekiem. Aby to zrobić, napisz sam wynik po zadaniu pytania:\n{question}"
+            f"Witaj na {member.guild.name}! Proszę rozwiąż zadanie matematyczne, żebyśmy wiedzieli, że jesteś człowiekiem.\n"
+            f"Napisz sam wynik:\n{question}"
         )
 
         def check(m):
@@ -188,99 +261,25 @@ async def on_member_join(member):
         try:
             msg = await bot.wait_for('message', check=check, timeout=120)
         except asyncio.TimeoutError:
-            await dm_channel.send("Nie odpowiedziałeś w czasie, proszę dołącz jeszcze raz do serwera i spróbuj ponownie.")
-            await member.kick(reason="Weryfikacja nieudana, powód: czas.")
+            await dm_channel.send("Nie odpowiedziałeś na czas. Spróbuj dołączyć ponownie i rozwiązać zadanie.")
+            await member.kick(reason="Weryfikacja nieudana - timeout")
             return
 
         try:
             user_answer = int(msg.content.strip())
         except ValueError:
-            await dm_channel.send("Zła odpowiedź, weryfikacja nieudana. Proszę dołącz jeszcze raz do serwera i spróbuj ponownie.")
-            await member.kick(reason="Weryfikacja nieudana, powód: zła odpowiedź.")
+            await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
+            await member.kick(reason="Weryfikacja nieudana - zła odpowiedź")
             return
 
         if user_answer == correct_answer:
-            await dm_channel.send("Zweryfikowano pomyślnie.")
+            await dm_channel.send("Weryfikacja zakończona sukcesem. Witamy na serwerze!")
         else:
-            await dm_channel.send("Weryfikacja nieudana. Proszę dołącz jeszcze raz do serwera i spróbuj ponownie.")
-            await member.kick(reason="Weryfikacja nieudana, powód: zła odpowiedź.")
+            await dm_channel.send("Niepoprawna odpowiedź. Spróbuj dołączyć ponownie.")
+            await member.kick(reason="Weryfikacja nieudana - zła odpowiedź")
 
     except Exception as e:
         print(f"Error verifying member {member}: {e}")
-
-# --- Self Assign Roles (Fixed) ---
-
-async def setup_self_assign_roles():
-    global role_message_id
-    channel = bot.get_channel(ROLE_CHANNEL_ID)
-    if channel is None:
-        print("❌ Role channel not found!")
-        return
-
-    # Load the message ID if it exists
-    if os.path.exists("role_message.json"):
-        with open("role_message.json", "r") as f:
-            try:
-                data = json.load(f)
-                role_message_id = data.get("message_id")
-            except json.JSONDecodeError:
-                role_message_id = None
-
-    # Try to fetch the existing message
-    if role_message_id:
-        try:
-            msg = await channel.fetch_message(role_message_id)
-            print(f"✅ Role message found: {msg.id}")
-            return  # Reuse existing message
-        except discord.NotFound:
-            print("⚠️ Previous role message not found. Sending a new one.")
-
-    # Create a new message
-    description = "Zareaguj, żeby uzyskać rolę:\n"
-    for emoji, role_id in EMOJI_TO_ROLE.items():
-        role = channel.guild.get_role(role_id)
-        if role:
-            description += f"{emoji} : {role.name}\n"
-
-    embed = discord.Embed(title="Autorole", description=description)
-    msg = await channel.send(embed=embed)
-    
-    for emoji in EMOJI_TO_ROLE.keys():
-        await msg.add_reaction(emoji)
-
-    role_message_id = msg.id
-
-    # Save the message ID
-    with open("role_message.json", "w") as f:
-        json.dump({"message_id": role_message_id}, f)
-
-    print(f"✅ New role message sent: {role_message_id}")
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.message_id != role_message_id:
-        return
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
-    if member and not member.bot:
-        role_id = EMOJI_TO_ROLE.get(str(payload.emoji))
-        if role_id:
-            role = guild.get_role(role_id)
-            if role:
-                await member.add_roles(role)
-
-@bot.event
-async def on_raw_reaction_remove(payload):
-    if payload.message_id != role_message_id:
-        return
-    guild = bot.get_guild(payload.guild_id)
-    member = guild.get_member(payload.user_id)
-    if member and not member.bot:
-        role_id = EMOJI_TO_ROLE.get(str(payload.emoji))
-        if role_id:
-            role = guild.get_role(role_id)
-            if role:
-                await member.remove_roles(role)
 
 # --- Auto Reactions & Link Filter ---
 
@@ -289,10 +288,13 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    is_target = (
-        message.channel.id == TARGET_CHANNEL_ID or
-        (hasattr(message.channel, "parent_id") and message.channel.parent_id == TARGET_CHANNEL_ID)
-    )
+    # Add reactions to messages in target channel or category
+    is_target = False
+    if message.channel.id == TARGET_CHANNEL_ID:
+        is_target = True
+    elif hasattr(message.channel, "category") and message.channel.category:
+        if message.channel.category.id == TARGET_CHANNEL_ID:
+            is_target = True
 
     if is_target:
         try:
@@ -302,7 +304,7 @@ async def on_message(message):
         except Exception as e:
             print(f"Reaction error: {e}")
 
-    # Link Filtering
+    # Link filtering
     if message.channel.id not in ALLOWED_LINK_CHANNELS:
         if "http://" in message.content or "https://" in message.content:
             try:
@@ -315,13 +317,12 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-@bot.command(name="reactions")
+@bot.command()
 async def reactions(ctx):
     if ctx.channel.id != TARGET_CHANNEL_ID:
         return
 
     messages = await ctx.channel.history(limit=50).flatten()
-
     total_up = 0
     total_down = 0
 
@@ -335,8 +336,8 @@ async def reactions(ctx):
     await ctx.send(f"👍: {total_up}, 👎: {total_down}")
 
 # --- Ban Command ---
-# To do: Unban command
-@bot.command(name="ban")
+
+@bot.command()
 @commands.has_permissions(ban_members=True)
 async def ban(ctx, user: discord.User, duration: str = None, *, reason: str = "No reason provided"):
     ban_duration = None
@@ -349,23 +350,42 @@ async def ban(ctx, user: discord.User, duration: str = None, *, reason: str = "N
             elif unit == "h":
                 ban_duration = time_amount * 3600
             else:
-                await ctx.send("Invalid format. Use '7d', '12h', or 'permanent'.")
+                await ctx.send("Niepoprawny format czasu. Użyj '7d', '12h' lub 'permanent'.")
                 return
         except Exception:
-            await ctx.send("Invalid duration.")
+            await ctx.send("Niepoprawny czas.")
             return
 
     await ctx.guild.ban(user, reason=reason)
-    await ctx.send(f"Banned {user.mention} {'permanently' if not ban_duration else f'for {duration}'}.")
+    await ctx.send(f"Zbanowano {user.mention} {'na stałe' if not ban_duration else f'na {duration}'}.")
 
     if ban_duration:
         await asyncio.sleep(ban_duration)
         await ctx.guild.unban(user)
-        await ctx.send(f"{user.mention} has been unbanned after {duration}.")
+        await ctx.send(f"{user.mention} został odbanowany po {duration}.")
+
+# --- On Ready ---
+
+@bot.event
+async def on_ready():
+    print(f"✅ Zalogowano jako {bot.user}!")
+
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        print("❌ Nie znaleziono serwera!")
+        return
+
+    # Setup ticket message
+    await setup_ticket_message()
+
+    # Setup self assign role message
+    await setup_role_message()
+
+    print("✅ Bot jest gotowy.")
 
 # --- Run Bot ---
 
 if not TOKEN or TOKEN == "TOKEN_HERE":
-    print("❌ Token not set in config.json.")
+    print("❌ Token nie został ustawiony w config.json.")
 else:
     bot.run(TOKEN)
