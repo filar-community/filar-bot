@@ -400,7 +400,7 @@ async def on_ready():
     print(f"✅ Bot gotowy! Zalogowano jako {bot.user} (ID: {bot.user.id})")
     await setup_ticket_message()
     await setup_role_message()
-
+    bot.add_view(TicketButton())
 # --- Start Bot ---
 if TOKEN:
     bot.run(TOKEN)
