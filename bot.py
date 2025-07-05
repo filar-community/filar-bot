@@ -5,12 +5,12 @@ import random
 import os
 import json
 from datetime import datetime, timedelta, timezone
+from filarbot import config
 
 # --- Load Config ---
 with open("config.json", "r", encoding="utf-8") as f:
     config = json.load(f)
 
-TOKEN = config.get("token")
 GUILD_ID = config.get("guild_id")
 TICKET_CHANNEL_ID = config.get("ticket_channel_id")
 STAFF_ROLE_ID = config.get("staff_role_id")
@@ -402,7 +402,7 @@ async def on_ready():
     await setup_role_message()
     bot.add_view(TicketButton())
 # --- Start Bot ---
-if TOKEN:
-    bot.run(TOKEN)
+if config.bot_token():
+    bot.run(config.bot_token())
 else:
-    print("❌ Brak tokenu w config.json")
+    print("❌ Brak tokenu")
